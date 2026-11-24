@@ -59,7 +59,14 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
     private static final String LIQUID_TAB_BAR_CONTENT = "bottom_nav_view";
 
     /** Widest refraction band, as a fraction of the short side of the surface. */
-    private static final float MAX_REFRACTION_FRACTION = 0.375f;
+    static final float MAX_REFRACTION_FRACTION = 0.375f;
+
+    /** Surface of LiquidBottomTabs, drawn on the glass when the liquid tab bar is on. */
+    private static final int SURFACE_LIGHT = 0xFAFAFA;
+    private static final int SURFACE_DARK = 0x121212;
+    private final android.graphics.Paint surfacePaint = new android.graphics.Paint();
+    /** Whether the view over the glass has Apple's tint layers, which drawSurface replaces. */
+    private boolean tintLayersFound;
 
     private final WeakReference<View> hostRef;
     private final LiquidGlassPatch.Surface surface;
@@ -172,6 +179,8 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
         canvas.clipPath(shape);
         canvas.translate(-padding, -padding);
         canvas.drawRenderNode(node);
+        canvas.translate(padding, padding);
+        drawSurface(host, canvas, width, height);
         canvas.restoreToCount(save);
 
         updateContent(host, density);
@@ -218,6 +227,21 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
             background.draw(recording);
             recording.restoreToCount(save);
         }
+    }
+
+    /**
+     * With the liquid tab bar on, Apple's tint is hidden (see {@link #layerPercent}) and this
+     * draws the tab bar's own surface instead, at the tint opacity, so both pills look alike.
+     */
+    private void drawSurface(View host, Canvas canvas, int width, int height) {
+        if (!LiquidSettings.liquidTabBar() || !tintLayersFound) return;
+        final int percent = clamp(LiquidSettings.tintOpacityPercent(), 0, 100);
+        if (percent == 0) return;
+        final int night = host.getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+        final int rgb = night == android.content.res.Configuration.UI_MODE_NIGHT_YES ? SURFACE_DARK : SURFACE_LIGHT;
+        surfacePaint.setColor((Math.round(255 * percent / 100f) << 24) | rgb);
+        canvas.drawRect(0, 0, width, height, surfacePaint);
     }
 
     private static int windowColor(View host) {
@@ -323,7 +347,7 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
             }
         }
 
-        if (content != null) fadeTint(host, content.getBackground());
+        tintLayersFound = content != null && fadeTint(host, content.getBackground());
     }
 
     private View contentView(View host) {
@@ -340,9 +364,10 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
         return content;
     }
 
-    private static void fadeTint(View host, Drawable background) {
+    /** @return true if the background is Apple's material with its tint layers. */
+    private static boolean fadeTint(View host, Drawable background) {
         final int percent = clamp(LiquidSettings.tintOpacityPercent(), 0, 100);
-        if (background == null) return;
+        if (background == null) return false;
 
         if (background instanceof LayerDrawable) {
             final LayerDrawable layers = (LayerDrawable) background;
@@ -354,19 +379,21 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
                 found = true;
                 fade(layer, layerPercent(layerName, percent));
             }
-            if (found) return;
+            if (found) return true;
         }
         fade(background, percent);
+        return false;
     }
 
     /**
-     * On pages with artwork (albums, playlists), Apple tints the mini player with a colour taken
-     * from the artwork. The liquid tab bar draws its own neutral glass without that tint, so with
-     * it on, the artwork layer is hidden: otherwise the mini player turns the artwork's colour
-     * while the tab bar right under it does not.
+     * The liquid tab bar draws its own neutral surface, not Apple's tint (a grey material, plus a
+     * colour from the artwork on albums and playlists). With it on, both of Apple's layers are
+     * hidden and {@link #drawSurface} draws the tab bar's surface instead, so the mini player and
+     * the tab bar look the same on every page.
      */
     private static int layerPercent(String layerName, int percent) {
-        if (ARTWORK_TINT_LAYER.equals(layerName) && LiquidSettings.liquidTabBar()) return 0;
+        // With the liquid tab bar, its own surface replaces Apple's tint altogether (drawSurface).
+        if (LiquidSettings.liquidTabBar()) return 0;
         return percent;
     }
 

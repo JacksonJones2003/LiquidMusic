@@ -62,6 +62,7 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.catalog.components.LiquidBottomTab
 import com.kyant.backdrop.catalog.components.LiquidBottomTabs
+import com.kyant.backdrop.catalog.components.LiquidBottomTabsGlass
 import java.lang.reflect.Method
 import java.util.WeakHashMap
 import kotlin.math.roundToInt
@@ -128,6 +129,7 @@ internal class LiquidTabBar private constructor(
         }
         val selected = remember { { selectedIndex } }
         val labels = LiquidSettings.revision.let { LiquidSettings.tabLabels() }
+        val glass = LiquidSettings.revision.let { glass() }
         val tabs = tabs
         Box(Modifier.fillMaxSize()) {
             // What is behind the bar, recorded for the glass but never shown itself.
@@ -145,6 +147,7 @@ internal class LiquidTabBar private constructor(
                     onTabSelected = ::onTabSelected,
                     backdrop = appleContent,
                     tabsCount = tabs.size,
+                    glass = glass,
                     modifier = Modifier
                         .align(Alignment.CenterStart)
                         .offset { IntOffset(barX, 0) }
@@ -168,6 +171,25 @@ internal class LiquidTabBar private constructor(
                 }
             }
         }
+    }
+
+    /**
+     * The same glass as the mini player (GlassRenderer), from the same settings, so the two pills
+     * look alike: blur, vibrancy, lens (kept a band along the edges, like GlassRenderer does) and
+     * a surface whose opacity is the tint setting, which GlassRenderer also draws in place of
+     * Apple's tint.
+     */
+    private fun glass(): LiquidBottomTabsGlass {
+        val maxRefraction = BAR_HEIGHT_DP * GlassRenderer.MAX_REFRACTION_FRACTION
+        val refractionHeight = LiquidSettings.refractionHeightDp().coerceAtLeast(0).toFloat().coerceAtMost(maxRefraction)
+        val refractionAmount = LiquidSettings.refractionAmountDp().coerceAtLeast(0).toFloat().coerceAtMost(refractionHeight)
+        return LiquidBottomTabsGlass(
+            blurRadius = LiquidSettings.blurRadiusDp().coerceAtLeast(0).dp,
+            refractionHeight = refractionHeight.dp,
+            refractionAmount = refractionAmount.dp,
+            saturation = LiquidSettings.saturationPercent().coerceAtLeast(0) / 100f,
+            surfaceAlpha = LiquidSettings.tintOpacityPercent().coerceIn(0, 100) / 100f,
+        )
     }
 
     private fun DrawScope.drawIcon(icon: Drawable?, color: Color) {
@@ -330,6 +352,8 @@ internal class LiquidTabBar private constructor(
 
     companion object {
         private val EMPTY = Rect()
+        /** Height of LiquidBottomTabs' bar. */
+        private const val BAR_HEIGHT_DP = 64f
         private val BARS = WeakHashMap<View, LiquidTabBar>()
         private val FAILED = WeakHashMap<View, Boolean>()
         private val METHODS = HashMap<String, Method>()

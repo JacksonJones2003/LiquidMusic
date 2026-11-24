@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.Immutable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -32,6 +33,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceIn
 import androidx.compose.ui.util.fastRoundToInt
@@ -45,7 +47,7 @@ import com.kyant.backdrop.catalog.utils.InteractiveHighlight
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.effects.colorControls
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
@@ -56,6 +58,19 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sign
 
+/**
+ * The glass of the bar. The defaults are Backdrop's own values. (LiquidMusic: added, so the bar
+ * can follow the same settings as the other glass surfaces.)
+ */
+@Immutable
+data class LiquidBottomTabsGlass(
+    val blurRadius: Dp = 8f.dp,
+    val refractionHeight: Dp = 24f.dp,
+    val refractionAmount: Dp = 24f.dp,
+    val saturation: Float = 1.5f,
+    val surfaceAlpha: Float = 0.4f,
+)
+
 @Composable
 fun LiquidBottomTabs(
     selectedTabIndex: () -> Int,
@@ -63,6 +78,7 @@ fun LiquidBottomTabs(
     backdrop: Backdrop,
     tabsCount: Int,
     modifier: Modifier = Modifier,
+    glass: LiquidBottomTabsGlass = LiquidBottomTabsGlass(),
     content: @Composable RowScope.() -> Unit
 ) {
     val isLightTheme = !isSystemInDarkTheme()
@@ -70,8 +86,8 @@ fun LiquidBottomTabs(
         if (isLightTheme) Color(0xFF0088FF)
         else Color(0xFF0091FF)
     val containerColor =
-        if (isLightTheme) Color(0xFFFAFAFA).copy(0.4f)
-        else Color(0xFF121212).copy(0.4f)
+        if (isLightTheme) Color(0xFFFAFAFA).copy(glass.surfaceAlpha)
+        else Color(0xFF121212).copy(glass.surfaceAlpha)
 
     val tabsBackdrop = rememberLayerBackdrop()
 
@@ -167,9 +183,9 @@ fun LiquidBottomTabs(
                     backdrop = backdrop,
                     shape = { Capsule() },
                     effects = {
-                        vibrancy()
-                        blur(8f.dp.toPx())
-                        lens(24f.dp.toPx(), 24f.dp.toPx())
+                        colorControls(saturation = glass.saturation)
+                        if (glass.blurRadius > 0f.dp) blur(glass.blurRadius.toPx())
+                        lens(glass.refractionHeight.toPx(), glass.refractionAmount.toPx())
                     },
                     layerBlock = {
                         val progress = dampedDragAnimation.pressProgress
@@ -205,11 +221,11 @@ fun LiquidBottomTabs(
                         shape = { Capsule() },
                         effects = {
                             val progress = dampedDragAnimation.pressProgress
-                            vibrancy()
-                            blur(8f.dp.toPx())
+                            colorControls(saturation = glass.saturation)
+                            if (glass.blurRadius > 0f.dp) blur(glass.blurRadius.toPx())
                             lens(
-                                24f.dp.toPx() * progress,
-                                24f.dp.toPx() * progress
+                                glass.refractionHeight.toPx() * progress,
+                                glass.refractionAmount.toPx() * progress
                             )
                         },
                         highlight = {
