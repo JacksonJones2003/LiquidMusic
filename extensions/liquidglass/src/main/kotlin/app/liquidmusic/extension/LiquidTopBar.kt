@@ -209,14 +209,25 @@ internal class LiquidTopBar private constructor(
         }
     }
 
-    private var compositionLogs = 0
-    private fun logComposition(count: Int) {
-        if (compositionLogs++ < 3) Log.i(LiquidGlassPatch.TAG, "Top bar composed: $count tabs, bar $barX/$barWidth x $barHeight, selected $selectedIndex")
+    // Diagnostics, readable with uiautomator as the overlay's content description (this app's
+    // process writes nothing to logcat on some phones).
+    private var diagMenu = ""
+    private var diagComposed = ""
+    private val diagTabs = sortedMapOf<Int, String>()
+
+    private fun updateDiag() {
+        overlay.contentDescription = "LMDIAG " + diagMenu + " | composed " + diagComposed + " | drawn " + diagTabs +
+            " | checked " + checkedId() + " | strip " + strip.width + "x" + strip.height
     }
 
-    private var tabLogs = 0
+    private fun logComposition(count: Int) {
+        diagComposed = "$count tabs, bar $barX/$barWidth x $barHeight, selected $selectedIndex"
+        updateDiag()
+    }
+
     private fun logTab(index: Int, title: String) {
-        if (tabLogs++ < 12) Log.i(LiquidGlassPatch.TAG, "Top bar tab $index: '$title'")
+        diagTabs[index] = title
+        updateDiag()
     }
 
     private fun DrawScope.drawMenuIcon(color: Color) {
@@ -341,8 +352,13 @@ internal class LiquidTopBar private constructor(
             val name = names[item]!!
             name.startsWith("top_level_") && !name.contains("search") && !isHidden(name)
         }.map { Tab(it.itemId, it.title?.toString().orEmpty()) }
-        Log.i(LiquidGlassPatch.TAG, "Top bar tabs: " + all.joinToString { names[it] + "=" + it.title + (if (it.isChecked) "*" else "") } +
-            " -> " + tabs.joinToString { it.title })
+        diagMenu = "menu " + menu.javaClass.name + " size " + menu.size() + ": " +
+            (0 until menu.size()).map(menu::getItem).joinToString { item ->
+                runCatching { resources.getResourceEntryName(item.itemId) }.getOrDefault(item.itemId.toString()) +
+                    "='" + item.title + "'" + (if (item.isVisible) "" else "(hidden)") + (if (item.isChecked) "*" else "") +
+                    (if (item.hasSubMenu()) "{sub " + item.subMenu?.size() + "}" else "")
+            } + " -> tabs " + tabs.joinToString { "'" + it.title + "'" }
+        updateDiag()
     }
 
     private fun signature(menu: Menu): Int {
