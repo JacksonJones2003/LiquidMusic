@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -172,6 +173,7 @@ internal class LiquidTopBar private constructor(
                             .clickable(interactionSource = null, indication = null) { tapStrip(height = barHeight, start = true) }
                             .drawBehind { drawMenuIcon(contentColor) }
                     )
+                    SideEffect { logComposition(tabs.size) }
                     LiquidBottomTabs(
                         selectedTabIndex = selected,
                         onTabSelected = ::onTabSelected,
@@ -184,6 +186,7 @@ internal class LiquidTopBar private constructor(
                     ) {
                         tabs.forEachIndexed { index, tab ->
                             LiquidBottomTab({ onTabClicked(index) }) {
+                                SideEffect { logTab(index, tab.title) }
                                 BasicText(
                                     tab.title,
                                     style = TextStyle(contentColor, 17f.sp, fontFamily = fontFamily),
@@ -204,6 +207,16 @@ internal class LiquidTopBar private constructor(
                 }
             }
         }
+    }
+
+    private var compositionLogs = 0
+    private fun logComposition(count: Int) {
+        if (compositionLogs++ < 3) Log.i(LiquidGlassPatch.TAG, "Top bar composed: $count tabs, bar $barX/$barWidth x $barHeight, selected $selectedIndex")
+    }
+
+    private var tabLogs = 0
+    private fun logTab(index: Int, title: String) {
+        if (tabLogs++ < 12) Log.i(LiquidGlassPatch.TAG, "Top bar tab $index: '$title'")
     }
 
     private fun DrawScope.drawMenuIcon(color: Color) {
@@ -328,6 +341,8 @@ internal class LiquidTopBar private constructor(
             val name = names[item]!!
             name.startsWith("top_level_") && !name.contains("search") && !isHidden(name)
         }.map { Tab(it.itemId, it.title?.toString().orEmpty()) }
+        Log.i(LiquidGlassPatch.TAG, "Top bar tabs: " + all.joinToString { names[it] + "=" + it.title + (if (it.isChecked) "*" else "") } +
+            " -> " + tabs.joinToString { it.title })
     }
 
     private fun signature(menu: Menu): Int {
