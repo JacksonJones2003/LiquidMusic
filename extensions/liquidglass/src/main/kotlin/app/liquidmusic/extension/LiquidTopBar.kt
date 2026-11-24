@@ -97,8 +97,11 @@ internal class LiquidTopBar private constructor(
     private val drawer: View,
 ) : ViewTreeObserver.OnPreDrawListener, View.OnAttachStateChangeListener {
 
-    /** A tab: a title, or an icon for search. */
-    private class Tab(val id: Int, val title: String, val icon: Drawable? = null)
+    /**
+     * A tab: a title, an icon (search), or the menu button, which is a tab of the bar so the drop
+     * can reach it too, but opens Apple's drawer instead of a page.
+     */
+    private class Tab(val id: Int, val title: String, val icon: Drawable? = null, val menu: Boolean = false)
 
     private val parent = strip.parent as ViewGroup
     private val overlay: ComposeView = ComposeHost.createView(strip.context)
@@ -115,6 +118,8 @@ internal class LiquidTopBar private constructor(
     // State read by the composition.
     private var tabs by mutableStateOf(emptyList<Tab>())
     private var selectedIndex by mutableIntStateOf(0)
+    /** Until when the drop stays on the menu button after it opened the drawer. */
+    private var menuReturnAt = 0L
     private var barX by mutableIntStateOf(0)
     private var barWidth by mutableIntStateOf(0)
     private var barHeight by mutableIntStateOf(0)
@@ -165,13 +170,6 @@ internal class LiquidTopBar private constructor(
                         .pointerInput(Unit) { detectLongPress(::openSettings) },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Apple's menu button: opens the drawer.
-                    Box(
-                        Modifier
-                            .size(height)
-                            .clickable(interactionSource = null, indication = null) { tapStrip(height = barHeight, start = true) }
-                            .drawBehind { drawMenuIcon(contentColor) }
-                    )
                     LiquidBottomTabs(
                         selectedTabIndex = selected,
                         onTabSelected = ::onTabSelected,
@@ -185,7 +183,9 @@ internal class LiquidTopBar private constructor(
                         tabs.forEachIndexed { index, tab ->
                             LiquidBottomTab({ onTabClicked(index) }) {
                                 val icon = tab.icon
-                                if (icon != null) {
+                                if (tab.menu) {
+                                    Box(Modifier.size(24f.dp).drawBehind { drawMenuIcon(contentColor) })
+                                } else if (icon != null) {
                                     // Search: Apple's magnifying glass, as a tab the drop can reach.
                                     Box(Modifier.size(24f.dp).drawBehind { drawIcon(icon, contentColor) })
                                 } else {
@@ -254,6 +254,17 @@ internal class LiquidTopBar private constructor(
 
     private fun onTabClicked(index: Int) {
         val tab = tabs.getOrNull(index) ?: return
+        if (tab.menu) {
+            // The drop moves onto the menu button, then onTabSelected opens the drawer. Until
+            // then, the frame sync must not send it back to the current page.
+            if (index == selectedIndex) {
+                openMenu(index)
+            } else {
+                menuReturnAt = SystemClock.uptimeMillis() + MENU_SLIDE_TIMEOUT_MS
+                selectedIndex = index
+            }
+            return
+        }
         if (index == selectedIndex) {
             // Same tab again: Apple scrolls its page back to the top.
             select(index, tab)
@@ -266,6 +277,10 @@ internal class LiquidTopBar private constructor(
     private fun onTabSelected(index: Int) {
         val tab = tabs.getOrNull(index) ?: return
         selectedIndex = index
+        if (tab.menu) {
+            openMenu(index)
+            return
+        }
         if (checkedId() != tab.id) {
             select(index, tab)
             if (LiquidSettings.tabHaptics()) overlay.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
@@ -284,13 +299,30 @@ internal class LiquidTopBar private constructor(
                     tapStrip(height = pill.height, start = false)
                 } else {
                     // Apple's text tabs share the strip between its two round buttons.
-                    val textTabs = tabs.filter { it.icon == null }
+                    val textTabs = tabs.filter { it.icon == null && !it.menu }
                     val position = textTabs.indexOf(tab)
                     val tabWidth = (pill.width - 2f * pill.height) / textTabs.size.coerceAtLeast(1)
                     tapStripAt(pill.height + tabWidth * (position + 0.5f))
                 }
             }
         }, if (handled) 250 else 0)
+    }
+
+    /**
+     * Opens Apple's drawer with its menu button. The drop stays on the button a moment, then
+     * goes back to the current page.
+     */
+    private fun openMenu(index: Int) {
+        selectedIndex = index
+        menuReturnAt = SystemClock.uptimeMillis() + MENU_RETURN_DELAY_MS
+        if (LiquidSettings.tabHaptics()) overlay.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        tapStrip(height = pill.height, start = true)
+        overlay.postDelayed({
+            if (SystemClock.uptimeMillis() < menuReturnAt || tabs.getOrNull(selectedIndex)?.menu != true) return@postDelayed
+            val checked = checkedId()
+            val current = if (checked == View.NO_ID) -1 else tabs.indexOfFirst { !it.menu && it.id == checked }
+            if (current >= 0) selectedIndex = current
+        }, MENU_RETURN_DELAY_MS)
     }
 
     /** Taps one of the round buttons at the ends of Apple's strip. */
@@ -321,7 +353,7 @@ internal class LiquidTopBar private constructor(
         val resources = drawer.resources
         val all = (0 until menu.size()).map(menu::getItem).filter { it.isVisible }
         val names = all.associateWith { runCatching { resources.getResourceEntryName(it.itemId) }.getOrDefault("") }
-        tabs = all.filter { item ->
+        tabs = listOf(Tab(View.NO_ID, "", menu = true)) + all.filter { item ->
             val name = names[item]!!
             name.startsWith("top_level_") && !isHidden(name)
         }.map { item ->
@@ -394,8 +426,9 @@ internal class LiquidTopBar private constructor(
         overlayY = location[1]
 
         val checked = checkedId()
-        val index = tabs.indexOfFirst { it.id == checked }
-        if (index >= 0 && index != selectedIndex) selectedIndex = index
+        val index = if (checked == View.NO_ID) -1 else tabs.indexOfFirst { !it.menu && it.id == checked }
+        // Back to the current page once the drop has shown the menu button pressed.
+        if (index >= 0 && index != selectedIndex && SystemClock.uptimeMillis() >= menuReturnAt) selectedIndex = index
     }
 
     /** Gives the strip back to Apple (the setting was turned off). */
@@ -419,6 +452,9 @@ internal class LiquidTopBar private constructor(
 
     companion object {
         private val EMPTY = Rect()
+        private const val MENU_RETURN_DELAY_MS = 600L
+        /** Longest the drop may take to reach the menu button before the sync takes over again. */
+        private const val MENU_SLIDE_TIMEOUT_MS = 1500L
         private val BARS = WeakHashMap<View, LiquidTopBar?>()
         private val FAILED = WeakHashMap<View, Boolean>()
         private val METHODS = HashMap<String, java.lang.reflect.Method>()

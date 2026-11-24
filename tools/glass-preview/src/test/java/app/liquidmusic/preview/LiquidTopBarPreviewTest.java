@@ -136,12 +136,29 @@ public class LiquidTopBarPreviewTest extends PreviewScene {
         // Search is the last tab: a tap moves the glass onto it and selects it in Apple's drawer.
         int[] location = new int[2];
         stripGlass.getLocationInWindow(location);
-        float tabsLeft = location[0] + stripGlass.getHeight() + dp(4);
-        float tabWidth = (stripGlass.getWidth() - stripGlass.getHeight() - dp(8)) / 4f;
-        tap(new float[]{tabsLeft + 3.5f * tabWidth, location[1] + stripGlass.getHeight() / 2f});
+        // Tabs: menu, Home, Radio, Library, Search ("Hide New" is on).
+        float tabsLeft = location[0] + dp(4);
+        float tabWidth = (stripGlass.getWidth() - dp(8)) / 5f;
+        float centerY = location[1] + stripGlass.getHeight() / 2f;
+        tap(new float[]{tabsLeft + 4.5f * tabWidth, centerY});
         advance(800);
         render("liquid-top-bar-search");
         assertTrue("search was selected in Apple's drawer, got " + drawer.selections,
                 drawer.selections.contains(R.id.top_level_search_page));
+
+        // The menu button is a tab too: the drop goes onto it, then back to the current page.
+        int[] stripTaps = {0};
+        strip.setOnTouchListener((view, event) -> {
+            // Only the bar's own taps (down and up at the same time), not the finger going through.
+            if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP
+                    && event.getEventTime() == event.getDownTime()) stripTaps[0]++;
+            return true;
+        });
+        tap(new float[]{tabsLeft + 0.5f * tabWidth, centerY});
+        render("liquid-top-bar-menu-pressed"); // 400 ms later: the drop rests on the menu button.
+        assertTrue("the menu tab of the bar opened the drawer through Apple's strip, taps: " + stripTaps[0], stripTaps[0] == 1);
+        advance(900);
+        render(null); // A frame, which sends the drop back (the preview only draws on demand).
+        render("liquid-top-bar-menu-back");
     }
 }
