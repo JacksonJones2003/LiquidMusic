@@ -61,6 +61,8 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
     /** Widest refraction band, as a fraction of the short side of the surface. */
     static final float MAX_REFRACTION_FRACTION = 0.375f;
 
+    private static final android.os.Handler MAIN = new android.os.Handler(android.os.Looper.getMainLooper());
+
     /** Surface of LiquidBottomTabs, drawn on the glass when the liquid tab bar is on. */
     private static final int SURFACE_LIGHT = 0xFAFAFA;
     private static final int SURFACE_DARK = 0x121212;
@@ -514,8 +516,12 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
     public void onViewDetachedFromWindow(View view) {
         stopListening(view);
         if (shadow != null) {
-            shadow.detach();
+            // Not now: this runs while the parent detaches its children one by one, and removing
+            // a sibling then leaves a hole in its list (NullPointerException in
+            // ViewGroup.dispatchDetachedFromWindow, when a page or the activity goes away).
+            final GlassShadow old = shadow;
             shadow = null;
+            MAIN.post(old::detach);
         }
         node.discardDisplayList();
         sourceRef = new WeakReference<>(null);
