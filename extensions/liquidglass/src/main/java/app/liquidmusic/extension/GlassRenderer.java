@@ -52,7 +52,8 @@ import java.util.WeakHashMap;
 final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.OnAttachStateChangeListener {
 
     /** Layers of Apple's bg_apple_material drawable, made more transparent so the glass shows. */
-    private static final String[] TINT_LAYER_NAMES = {"material_layer", "artwork_color_scheme_layer"};
+    private static final String ARTWORK_TINT_LAYER = "artwork_color_scheme_layer";
+    private static final String[] TINT_LAYER_NAMES = {"material_layer", ARTWORK_TINT_LAYER};
 
     /** The view over the tab bar's BlurView, which the liquid tab bar can replace. */
     private static final String LIQUID_TAB_BAR_CONTENT = "bottom_nav_view";
@@ -351,11 +352,22 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
                 final Drawable layer = id != 0 ? layers.findDrawableByLayerId(id) : null;
                 if (layer == null) continue;
                 found = true;
-                fade(layer, percent);
+                fade(layer, layerPercent(layerName, percent));
             }
             if (found) return;
         }
         fade(background, percent);
+    }
+
+    /**
+     * On pages with artwork (albums, playlists), Apple tints the mini player with a colour taken
+     * from the artwork. The liquid tab bar draws its own neutral glass without that tint, so with
+     * it on, the artwork layer is hidden: otherwise the mini player turns the artwork's colour
+     * while the tab bar right under it does not.
+     */
+    private static int layerPercent(String layerName, int percent) {
+        if (ARTWORK_TINT_LAYER.equals(layerName) && LiquidSettings.liquidTabBar()) return 0;
+        return percent;
     }
 
     private static void fade(Drawable drawable, int percent) {
