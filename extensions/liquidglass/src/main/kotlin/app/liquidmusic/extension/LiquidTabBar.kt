@@ -94,6 +94,7 @@ internal class LiquidTabBar private constructor(
     private val location = IntArray(2)
     private var errorLogged = false
     private var tabsRevision = -1
+    private var menuSignature = 0
 
     // State read by the composition.
     private var tabs by mutableStateOf(emptyList<Tab>())
@@ -215,9 +216,27 @@ internal class LiquidTabBar private constructor(
         if (selectedItemId() != tab.id) setSelectedItemId(tab.id)
     }
 
+    /**
+     * Identifies the items of Apple's menu as last read. Apple can fill or change the menu after
+     * the bar is set up (on a cold start the bar may come first): without reading it again, the
+     * bar would keep an empty list of tabs and draw nothing over Apple's hidden bar.
+     */
+    private fun menuSignature(menu: Menu): Int {
+        var signature = menu.size()
+        for (i in 0 until menu.size()) {
+            val item = menu.getItem(i)
+            signature = 31 * signature + item.itemId
+            signature = 31 * signature + (if (item.isVisible) 1 else 0)
+            signature = 31 * signature + System.identityHashCode(item.icon)
+            signature = 31 * signature + (item.title?.toString()?.hashCode() ?: 0)
+        }
+        return signature
+    }
+
     private fun refreshTabs() {
         tabsRevision = LiquidSettings.revision
         val menu = invoke(bottomNav, "getMenu") as? Menu ?: return
+        menuSignature = menuSignature(menu)
         val resources = bottomNav.resources
         tabs = (0 until menu.size()).map(menu::getItem).filter { it.isVisible }.mapNotNull { item ->
             val name = runCatching { resources.getResourceEntryName(item.itemId) }.getOrDefault("")
@@ -225,6 +244,11 @@ internal class LiquidTabBar private constructor(
             val icon = item.icon?.constantState?.newDrawable(resources)?.mutate() ?: item.icon
             Tab(item.itemId, name, item.title?.toString().orEmpty(), icon)
         }
+    }
+
+    private fun menuChanged(): Boolean {
+        val menu = invoke(bottomNav, "getMenu") as? Menu ?: return false
+        return menuSignature(menu) != menuSignature
     }
 
     private fun selectedItemId(): Int = invoke(bottomNav, "getSelectedItemId") as? Int ?: View.NO_ID
@@ -277,7 +301,7 @@ internal class LiquidTabBar private constructor(
         overlayX = location[0]
         overlayY = location[1]
 
-        if (tabsRevision != LiquidSettings.revision) refreshTabs()
+        if (tabsRevision != LiquidSettings.revision || menuChanged()) refreshTabs()
         val index = tabs.indexOfFirst { it.id == selectedItemId() }
         if (index >= 0 && index != selectedIndex) selectedIndex = index
     }
