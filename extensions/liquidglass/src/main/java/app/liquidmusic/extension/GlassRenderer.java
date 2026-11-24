@@ -57,6 +57,9 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
     /** The view over the tab bar's BlurView, which the liquid tab bar can replace. */
     private static final String LIQUID_TAB_BAR_CONTENT = "bottom_nav_view";
 
+    /** Widest refraction band, as a fraction of the short side of the surface. */
+    private static final float MAX_REFRACTION_FRACTION = 0.375f;
+
     private final WeakReference<View> hostRef;
     private final LiquidGlassPatch.Surface surface;
 
@@ -141,7 +144,9 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
 
         final float density = host.getResources().getDisplayMetrics().density;
         final float blurRadius = Math.max(0, LiquidSettings.blurRadiusDp()) * density;
-        final int padding = (int) Math.ceil(blurRadius);
+        // A Gaussian blur reaches about two radii: with a single radius of padding, the clamped
+        // edge of the node would be smeared into the glass as streaks.
+        final int padding = (int) Math.ceil(2f * blurRadius);
         final float corner = cornerRadius(host.getBackground(), width, height);
 
         // The window background, then the content behind the surface, with one blur radius
@@ -254,11 +259,19 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
 
     @TargetApi(Build.VERSION_CODES.TIRAMISU)
     private static RenderEffect lens(int width, int height, int padding, float corner, float density) {
+        // The lens only pulls the content inwards, so it must stay a band along the edges. If the
+        // band covers the whole surface (a short pill such as the mini player with a wide
+        // refraction setting), or the content is pulled further than the band is wide, edge pixels
+        // sample past the centre line: the content behind shows up mirrored and doubled instead of
+        // bent. Backdrop's own tab bar uses a 24 dp band on a 64 dp bar, hence 3/8 of the short side.
         final float refractionHeight = Math.min(
                 Math.max(0, LiquidSettings.refractionHeightDp()) * density,
-                Math.min(width, height) / 2f
+                Math.min(width, height) * MAX_REFRACTION_FRACTION
         );
-        final float refractionAmount = Math.max(0, LiquidSettings.refractionAmountDp()) * density;
+        final float refractionAmount = Math.min(
+                Math.max(0, LiquidSettings.refractionAmountDp()) * density,
+                refractionHeight
+        );
         if (refractionHeight <= 0f || refractionAmount <= 0f) return null;
 
         final boolean dispersion = LiquidSettings.chromaticAberration();
