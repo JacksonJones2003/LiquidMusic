@@ -118,15 +118,22 @@ public final class LiquidGlassPatch {
         final boolean optional;
         /** Floating surface that gets the same drop shadow as the liquid tab bar. */
         final boolean shadow;
+        /** Resource entry name of a tab strip over the surface that gets the glide (TopTabsGlide). */
+        final String glideTabsIdName;
 
         Surface(String contentIdName, boolean optional) {
-            this(contentIdName, optional, false);
+            this(contentIdName, optional, false, null);
         }
 
         Surface(String contentIdName, boolean optional, boolean shadow) {
+            this(contentIdName, optional, shadow, null);
+        }
+
+        Surface(String contentIdName, boolean optional, boolean shadow, String glideTabsIdName) {
             this.contentIdName = contentIdName;
             this.optional = optional;
             this.shadow = shadow;
+            this.glideTabsIdName = glideTabsIdName;
         }
     }
 
@@ -139,7 +146,9 @@ public final class LiquidGlassPatch {
         SURFACES.put("mini_player_blur", new Surface("mini_player_content", false, true));
         // fragment_landing_search.xml and the tablet layouts.
         SURFACES.put("floating_search_bar_blur", new Surface(null, true, true));
-        SURFACES.put("top_nav_blur", new Surface(null, true));
+        // layout-w600dp/fragment_music_content.xml: the floating tab strip of large screens
+        // (unfolded foldables, tablets), a ComposeView over this BlurView.
+        SURFACES.put("top_nav_blur", new Surface(null, true, true, "top_nav_tabs"));
         // layout-w600dp/activity_main.xml: the sidebar of tablets, with the navigation over it.
         SURFACES.put(SIDEBAR, new Surface("drawer_nav_view", false));
     }
