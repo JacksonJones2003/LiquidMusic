@@ -119,6 +119,10 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
     private GlassRim rim;
     private WeakReference<View> rimHostRef = new WeakReference<>(null);
 
+    // Drop shadow of floating surfaces, in a view of its own below the BlurView.
+    private GlassShadow shadow;
+    private float drawnCorner;
+
     GlassRenderer(View host, LiquidGlassPatch.Surface surface) {
         this.hostRef = new WeakReference<>(host);
         this.surface = surface;
@@ -182,6 +186,9 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
         canvas.translate(padding, padding);
         drawSurface(host, canvas, width, height);
         canvas.restoreToCount(save);
+
+        drawnCorner = corner;
+        setUpShadow(host);
 
         updateContent(host, density);
         if (rimHostRef.get() == host) {
@@ -464,6 +471,8 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
         try {
             View host = hostRef.get();
             View source = sourceRef.get();
+            // Before the checks below: the shadow also has to hide when the surface does.
+            if (host != null && shadow != null && shadow.getParent() != null) shadow.follow(host, drawnCorner);
             if (host == null || source == null || !host.isShown()) return true;
             host.getLocationInWindow(hostLocation);
             source.getLocationInWindow(sourceLocation);
@@ -481,6 +490,21 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
         return true;
     }
 
+    /** Adds the shadow after this frame: views cannot be added while drawing. */
+    private void setUpShadow(View host) {
+        if (!surface.shadow || shadow != null) return;
+        final GlassShadow created = new GlassShadow(host.getContext());
+        shadow = created;
+        host.post(() -> {
+            try {
+                if (shadow != created || !host.isAttachedToWindow() || !created.attachBelow(host)) return;
+                created.follow(host, drawnCorner);
+            } catch (Throwable t) {
+                android.util.Log.e(LiquidGlassPatch.TAG, "Glass shadow disabled", t);
+            }
+        });
+    }
+
     @Override
     public void onViewAttachedToWindow(View view) {
     }
@@ -488,6 +512,10 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
     @Override
     public void onViewDetachedFromWindow(View view) {
         stopListening(view);
+        if (shadow != null) {
+            shadow.detach();
+            shadow = null;
+        }
         node.discardDisplayList();
         sourceRef = new WeakReference<>(null);
         sourceNode = null;

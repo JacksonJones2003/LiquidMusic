@@ -116,10 +116,17 @@ public final class LiquidGlassPatch {
         /** Resource entry name of the view drawn over the BlurView, whose tint is faded. */
         final String contentIdName;
         final boolean optional;
+        /** Floating surface that gets the same drop shadow as the liquid tab bar. */
+        final boolean shadow;
 
         Surface(String contentIdName, boolean optional) {
+            this(contentIdName, optional, false);
+        }
+
+        Surface(String contentIdName, boolean optional, boolean shadow) {
             this.contentIdName = contentIdName;
             this.optional = optional;
+            this.shadow = shadow;
         }
     }
 
@@ -129,9 +136,9 @@ public final class LiquidGlassPatch {
     static {
         // fragment_music_content.xml: floating tab bar (BottomNavigationView) and mini player.
         SURFACES.put("bottom_nav_blur", new Surface("bottom_nav_view", false));
-        SURFACES.put("mini_player_blur", new Surface("mini_player_content", false));
+        SURFACES.put("mini_player_blur", new Surface("mini_player_content", false, true));
         // fragment_landing_search.xml and the tablet layouts.
-        SURFACES.put("floating_search_bar_blur", new Surface(null, true));
+        SURFACES.put("floating_search_bar_blur", new Surface(null, true, true));
         SURFACES.put("top_nav_blur", new Surface(null, true));
         // layout-w600dp/activity_main.xml: the sidebar of tablets, with the navigation over it.
         SURFACES.put(SIDEBAR, new Surface("drawer_nav_view", false));
