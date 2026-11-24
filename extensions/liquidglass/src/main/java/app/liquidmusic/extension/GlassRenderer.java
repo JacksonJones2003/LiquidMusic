@@ -189,7 +189,7 @@ final class GlassRenderer implements ViewTreeObserver.OnPreDrawListener, View.On
 
         drawnCorner = corner;
         setUpShadow(host);
-        if (surface.glideTabsIdName != null) TopTabsGlide.install(host, surface.glideTabsIdName);
+        if (surface.glideTabsIdName != null) LiquidTopBar.install(host, surface.glideTabsIdName);
 
         updateContent(host, density);
         if (rimHostRef.get() == host) {

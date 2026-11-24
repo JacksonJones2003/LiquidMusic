@@ -79,6 +79,10 @@ fun LiquidBottomTabs(
     tabsCount: Int,
     modifier: Modifier = Modifier,
     glass: LiquidBottomTabsGlass = LiquidBottomTabsGlass(),
+    // LiquidMusic: the height of the bar (the drop is 8 dp lower), and whether the bar draws its
+    // own glass, or only the tabs and the drop over a glass drawn by someone else.
+    barHeight: Dp = 64f.dp,
+    showBar: Boolean = true,
     content: @Composable RowScope.() -> Unit
 ) {
     val isLightTheme = !isSystemInDarkTheme()
@@ -179,24 +183,27 @@ fun LiquidBottomTabs(
                 .graphicsLayer {
                     translationX = panelOffset
                 }
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { Capsule() },
-                    effects = {
-                        colorControls(saturation = glass.saturation)
-                        if (glass.blurRadius > 0f.dp) blur(glass.blurRadius.toPx())
-                        lens(glass.refractionHeight.toPx(), glass.refractionAmount.toPx())
-                    },
-                    layerBlock = {
-                        val progress = dampedDragAnimation.pressProgress
-                        val scale = lerp(1f, 1f + 16f.dp.toPx() / size.width, progress)
-                        scaleX = scale
-                        scaleY = scale
-                    },
-                    onDrawSurface = { drawRect(containerColor) }
+                .then(
+                    if (!showBar) Modifier
+                    else Modifier.drawBackdrop(
+                        backdrop = backdrop,
+                        shape = { Capsule() },
+                        effects = {
+                            colorControls(saturation = glass.saturation)
+                            if (glass.blurRadius > 0f.dp) blur(glass.blurRadius.toPx())
+                            lens(glass.refractionHeight.toPx(), glass.refractionAmount.toPx())
+                        },
+                        layerBlock = {
+                            val progress = dampedDragAnimation.pressProgress
+                            val scale = lerp(1f, 1f + 16f.dp.toPx() / size.width, progress)
+                            scaleX = scale
+                            scaleY = scale
+                        },
+                        onDrawSurface = { drawRect(containerColor) }
+                    )
                 )
                 .then(interactiveHighlight.modifier)
-                .height(64f.dp)
+                .height(barHeight)
                 .fillMaxWidth()
                 .padding(4f.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -235,7 +242,7 @@ fun LiquidBottomTabs(
                         onDrawSurface = { drawRect(containerColor) }
                     )
                     .then(interactiveHighlight.modifier)
-                    .height(56f.dp)
+                    .height(barHeight - 8f.dp)
                     .fillMaxWidth()
                     .padding(horizontal = 4f.dp)
                     .graphicsLayer(colorFilter = ColorFilter.tint(accentColor)),
@@ -297,7 +304,7 @@ fun LiquidBottomTabs(
                         drawRect(Color.Black.copy(alpha = 0.03f * progress))
                     }
                 )
-                .height(56f.dp)
+                .height(barHeight - 8f.dp)
                 .fillMaxWidth(1f / tabsCount)
         )
     }

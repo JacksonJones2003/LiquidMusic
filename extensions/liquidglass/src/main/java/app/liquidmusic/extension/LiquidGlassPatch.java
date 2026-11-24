@@ -118,7 +118,7 @@ public final class LiquidGlassPatch {
         final boolean optional;
         /** Floating surface that gets the same drop shadow as the liquid tab bar. */
         final boolean shadow;
-        /** Resource entry name of a tab strip over the surface that gets the glide (TopTabsGlide). */
+        /** Resource entry name of a tab strip over the surface that the liquid top bar replaces. */
         final String glideTabsIdName;
 
         Surface(String contentIdName, boolean optional) {
