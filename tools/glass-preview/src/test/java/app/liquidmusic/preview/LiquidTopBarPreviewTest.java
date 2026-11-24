@@ -101,8 +101,23 @@ public class LiquidTopBarPreviewTest extends PreviewScene {
         drawer.setCheckedItem(ids[0]);
         root.addView(drawer, new FrameLayout.LayoutParams(1, 1));
 
-        activity.setContentView(root);
-        stripGlass.setupWith(target, (ColorDrawable) activity.getWindow().getDecorView().getBackground());
+        // As on the phone: "Hide New" on, and the drawer's labels in a font of their own.
+        app.liquidmusic.extension.LiquidSettings.INSTANCE.init(activity);
+        app.liquidmusic.extension.LiquidSettings.INSTANCE.set("hideNewTab", true);
+        android.widget.TextView drawerLabel = label("Home", Color.BLACK, 14);
+        drawerLabel.setTypeface(android.graphics.Typeface.create("serif", android.graphics.Typeface.NORMAL));
+        drawer.addView(drawerLabel);
+        BlurTarget source = target;
+        if (Boolean.getBoolean("preview.outerTarget")) {
+            // As layout-w600dp/activity_main.xml: a BlurTarget around the whole screen.
+            BlurTarget outer = new BlurTarget(activity);
+            if (Boolean.getBoolean("preview.outerSource")) source = outer;
+            outer.addView(root, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            activity.setContentView(outer);
+        } else {
+            activity.setContentView(root);
+        }
+        stripGlass.setupWith(source, (ColorDrawable) activity.getWindow().getDecorView().getBackground());
         shadowOf(Looper.getMainLooper()).idle();
         render(null);
         render(null);
@@ -117,5 +132,16 @@ public class LiquidTopBarPreviewTest extends PreviewScene {
             }
         }
         assertTrue("the tabs are drawn (" + dark + " dark pixels)", dark > 50);
+
+        // Search is the last tab: a tap moves the glass onto it and selects it in Apple's drawer.
+        int[] location = new int[2];
+        stripGlass.getLocationInWindow(location);
+        float tabsLeft = location[0] + stripGlass.getHeight() + dp(4);
+        float tabWidth = (stripGlass.getWidth() - stripGlass.getHeight() - dp(8)) / 4f;
+        tap(new float[]{tabsLeft + 3.5f * tabWidth, location[1] + stripGlass.getHeight() / 2f});
+        advance(800);
+        render("liquid-top-bar-search");
+        assertTrue("search was selected in Apple's drawer, got " + drawer.selections,
+                drawer.selections.contains(R.id.top_level_search_page));
     }
 }

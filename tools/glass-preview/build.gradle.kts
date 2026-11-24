@@ -36,6 +36,8 @@ android {
                 // Draw with HardwareRenderer, so RenderNode, RenderEffect and AGSL really run.
                 it.systemProperty("robolectric.pixelCopyRenderMode", "hardware")
                 it.systemProperty("preview.out", layout.buildDirectory.dir("preview").get().asFile.absolutePath)
+                providers.gradleProperty("outerTarget").orNull?.let { value -> it.systemProperty("preview.outerTarget", value) }
+                providers.gradleProperty("outerSource").orNull?.let { value -> it.systemProperty("preview.outerSource", value) }
                 // Coroutine delays (the long press timeout) on the main looper, whose clock the
                 // tests advance, rather than on a timer thread.
                 it.systemProperty("kotlinx.coroutines.main.delay", "true")

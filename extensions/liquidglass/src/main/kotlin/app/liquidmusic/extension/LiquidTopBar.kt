@@ -37,7 +37,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -57,8 +56,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -100,7 +97,8 @@ internal class LiquidTopBar private constructor(
     private val drawer: View,
 ) : ViewTreeObserver.OnPreDrawListener, View.OnAttachStateChangeListener {
 
-    private class Tab(val id: Int, val title: String)
+    /** A tab: a title, or an icon for search. */
+    private class Tab(val id: Int, val title: String, val icon: Drawable? = null)
 
     private val parent = strip.parent as ViewGroup
     private val overlay: ComposeView = ComposeHost.createView(strip.context)
@@ -112,7 +110,6 @@ internal class LiquidTopBar private constructor(
     private var errorLogged = false
     private var tabsSignature = 0
     private var tabsRevision = -1
-    private var searchIcon: Drawable? = null
     private val labelTypeface: Typeface? = findTypeface(drawer)
 
     // State read by the composition.
@@ -123,31 +120,6 @@ internal class LiquidTopBar private constructor(
     private var barHeight by mutableIntStateOf(0)
     private var overlayX by mutableIntStateOf(0)
     private var overlayY by mutableIntStateOf(0)
-
-    // Diagnostics, readable with uiautomator as the overlay's content description (this app's
-    // process writes nothing to logcat on some phones).
-    private var diagMenu = ""
-    private var diagComposed = ""
-    private val diagTabs = sortedMapOf<Int, String>()
-    private var diagArea = ""
-    private val diagPlaced = sortedMapOf<Int, String>()
-
-    private fun updateDiag() {
-        overlay.contentDescription = "LMDIAG " + diagMenu + " | composed " + diagComposed + " | drawn " + diagTabs +
-            " | checked " + checkedId() + " | strip " + strip.width + "x" + strip.height +
-            " | settings hideNew=" + LiquidSettings.hideNewTab() + " hideRadio=" + LiquidSettings.hideRadioTab() +
-            " | font " + labelTypeface + " | area " + diagArea + " | placed " + diagPlaced
-    }
-
-    private fun logComposition(count: Int) {
-        diagComposed = "$count tabs, bar $barX/$barWidth x $barHeight, selected $selectedIndex"
-        updateDiag()
-    }
-
-    private fun logTab(index: Int, title: String) {
-        diagTabs[index] = title
-        updateDiag()
-    }
 
     init {
         overlay.outlineProvider = null
@@ -200,45 +172,34 @@ internal class LiquidTopBar private constructor(
                             .clickable(interactionSource = null, indication = null) { tapStrip(height = barHeight, start = true) }
                             .drawBehind { drawMenuIcon(contentColor) }
                     )
-                    SideEffect { logComposition(tabs.size) }
                     LiquidBottomTabs(
                         selectedTabIndex = selected,
                         onTabSelected = ::onTabSelected,
                         backdrop = appleContent,
                         tabsCount = tabs.size,
-                        modifier = Modifier
-                            .weight(1f)
-                            .onGloballyPositioned { diagArea = it.size.toString() + "@" + it.positionInRoot(); updateDiag() },
+                        modifier = Modifier.weight(1f),
                         glass = glass,
                         barHeight = height,
                         showBar = false,
                     ) {
                         tabs.forEachIndexed { index, tab ->
-                            LiquidBottomTab(
-                                { onTabClicked(index) },
-                                Modifier.onGloballyPositioned {
-                                    diagPlaced[index] = it.size.toString() + "@" + it.positionInRoot() + (if (it.isAttached) "" else "(detached)")
-                                    updateDiag()
+                            LiquidBottomTab({ onTabClicked(index) }) {
+                                val icon = tab.icon
+                                if (icon != null) {
+                                    // Search: Apple's magnifying glass, as a tab the drop can reach.
+                                    Box(Modifier.size(24f.dp).drawBehind { drawIcon(icon, contentColor) })
+                                } else {
+                                    BasicText(
+                                        tab.title,
+                                        style = TextStyle(contentColor, 17f.sp, fontFamily = fontFamily),
+                                        overflow = TextOverflow.Ellipsis,
+                                        softWrap = false,
+                                        maxLines = 1
+                                    )
                                 }
-                            ) {
-                                SideEffect { logTab(index, tab.title) }
-                                BasicText(
-                                    tab.title,
-                                    style = TextStyle(contentColor, 17f.sp, fontFamily = fontFamily),
-                                    overflow = TextOverflow.Ellipsis,
-                                    softWrap = false,
-                                    maxLines = 1
-                                )
                             }
                         }
                     }
-                    // Apple's search button.
-                    Box(
-                        Modifier
-                            .size(height)
-                            .clickable(interactionSource = null, indication = null) { tapStrip(height = barHeight, start = false) }
-                            .drawBehind { drawSearchIcon(contentColor) }
-                    )
                 }
             }
         }
@@ -256,13 +217,9 @@ internal class LiquidTopBar private constructor(
         }
     }
 
-    private fun DrawScope.drawSearchIcon(color: Color) {
-        val icon = searchIcon ?: return
-        val iconSize = (24f * density).roundToInt()
-        val left = ((size.width - iconSize) / 2f).roundToInt()
-        val top = ((size.height - iconSize) / 2f).roundToInt()
+    private fun DrawScope.drawIcon(icon: Drawable, color: Color) {
         drawIntoCanvas { canvas ->
-            icon.setBounds(left, top, left + iconSize, top + iconSize)
+            icon.setBounds(0, 0, size.width.roundToInt(), size.height.roundToInt())
             icon.colorFilter = PorterDuffColorFilter(color.toArgb(), PorterDuff.Mode.SRC_IN)
             icon.draw(canvas.nativeCanvas)
         }
@@ -323,10 +280,15 @@ internal class LiquidTopBar private constructor(
         val handled = runCatching { menu()?.performIdentifierAction(tab.id, 0) == true }.getOrDefault(false)
         strip.postDelayed({
             if (!handled || (checkedId() != tab.id && index == selectedIndex)) {
-                val count = tabs.size.coerceAtLeast(1)
-                val start = pill.height.toFloat()
-                val tabWidth = (pill.width - 2f * pill.height) / count
-                tapStripAt(start + tabWidth * (index + 0.5f))
+                if (tab.icon != null) {
+                    tapStrip(height = pill.height, start = false)
+                } else {
+                    // Apple's text tabs share the strip between its two round buttons.
+                    val textTabs = tabs.filter { it.icon == null }
+                    val position = textTabs.indexOf(tab)
+                    val tabWidth = (pill.width - 2f * pill.height) / textTabs.size.coerceAtLeast(1)
+                    tapStripAt(pill.height + tabWidth * (position + 0.5f))
+                }
             }
         }, if (handled) 250 else 0)
     }
@@ -359,20 +321,16 @@ internal class LiquidTopBar private constructor(
         val resources = drawer.resources
         val all = (0 until menu.size()).map(menu::getItem).filter { it.isVisible }
         val names = all.associateWith { runCatching { resources.getResourceEntryName(it.itemId) }.getOrDefault("") }
-        searchIcon = all.firstOrNull { names[it]!!.contains("search") }?.icon?.let {
-            it.constantState?.newDrawable(resources)?.mutate() ?: it
-        }
         tabs = all.filter { item ->
             val name = names[item]!!
-            name.startsWith("top_level_") && !name.contains("search") && !isHidden(name)
-        }.map { Tab(it.itemId, it.title?.toString().orEmpty()) }
-        diagMenu = "menu " + menu.javaClass.name + " size " + menu.size() + ": " +
-            (0 until menu.size()).map(menu::getItem).joinToString { item ->
-                runCatching { resources.getResourceEntryName(item.itemId) }.getOrDefault(item.itemId.toString()) +
-                    "='" + item.title + "'" + (if (item.isVisible) "" else "(hidden)") + (if (item.isChecked) "*" else "") +
-                    (if (item.hasSubMenu()) "{sub " + item.subMenu?.size() + "}" else "")
-            } + " -> tabs " + tabs.joinToString { "'" + it.title + "'" }
-        updateDiag()
+            name.startsWith("top_level_") && !isHidden(name)
+        }.map { item ->
+            // Search is a tab too, as on the bottom bar, drawn with Apple's magnifying glass.
+            val icon = if (names[item]!!.contains("search")) {
+                item.icon?.let { it.constantState?.newDrawable(resources)?.mutate() ?: it }
+            } else null
+            Tab(item.itemId, item.title?.toString().orEmpty(), icon)
+        }
     }
 
     private fun signature(menu: Menu): Int {
@@ -497,6 +455,7 @@ internal class LiquidTopBar private constructor(
         private fun isHidden(name: String) =
             (name.contains("new") && LiquidSettings.hideNewTab()) ||
                 (name.contains("radio") && LiquidSettings.hideRadioTab())
+        // (Search stays: it is the button at the end of Apple's strip.)
 
         private fun findTypeface(view: View): Typeface? {
             if (view is TextView) return view.typeface
