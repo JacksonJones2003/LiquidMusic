@@ -38,15 +38,17 @@ import java.util.WeakHashMap;
  * the drop.
  * <p>
  * The strip is Apple's own Compose view and stays in charge of the tabs: it draws them, keeps the
- * selection and navigates. This only watches its touches. A tap goes to Apple untouched. Once the
- * finger slides further than the touch slop, Apple's press is cancelled, the drop takes over, and
- * on release Apple gets a tap where the drop is.
+ * selection and navigates. The drop's view, over the strip, receives the touches that start on the
+ * tabs and passes them on to the strip, so a tap reaches Apple as usual. (A touch listener on the
+ * strip would never run: the ComposeView's child takes the touches.) Once the finger slides
+ * further than the touch slop, Apple's press is cancelled, the drop takes over, and on release
+ * Apple gets a tap where the drop is.
  * <p>
  * The drop is drawn by a view of its own, over the strip, that records the strip's glass and tabs
  * in a RenderNode and bends them with the lens of {@link GlassShaders} (Android 13+).
  */
 @TargetApi(Build.VERSION_CODES.TIRAMISU)
-final class TopTabsGlide implements View.OnTouchListener {
+final class TopTabsGlide {
 
     private static final WeakHashMap<View, TopTabsGlide> GLIDES = new WeakHashMap<>();
 
@@ -78,8 +80,6 @@ final class TopTabsGlide implements View.OnTouchListener {
 
     private boolean tracking;
     private boolean gliding;
-    /** Set while events made here go to Apple's strip, so that they are not watched again. */
-    private boolean forwarding;
     private float downX;
 
     private TopTabsGlide(ViewGroup parent, View pill, View tabs) {
@@ -89,19 +89,26 @@ final class TopTabsGlide implements View.OnTouchListener {
         drop = new Drop(tabs.getContext());
         parent.addView(drop, parent.indexOfChild(tabs) + 1,
                 new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        tabs.setOnTouchListener(this);
     }
 
     // region Touches
 
-    @SuppressLint("ClickableViewAccessibility") // Taps still reach Apple's strip and its semantics.
-    @Override
-    public boolean onTouch(View view, MotionEvent event) {
-        if (forwarding) return false;
+    /**
+     * A touch on the drop's view, in the coordinates of the strip.
+     *
+     * @return false for a touch that does not start on the tabs, which then goes to the views
+     * under the drop's view as if it was not there.
+     */
+    boolean onTouch(MotionEvent event) {
         try {
             return handle(event);
         } catch (Throwable t) {
             Log.e(LiquidGlassPatch.TAG, "Tab glide failed", t);
+            if (tracking && !gliding) {
+                final MotionEvent cancel = MotionEvent.obtain(event);
+                cancel.setAction(MotionEvent.ACTION_CANCEL);
+                forward(cancel);
+            }
             tracking = gliding = false;
             drop.hide();
             return false;
@@ -112,20 +119,26 @@ final class TopTabsGlide implements View.OnTouchListener {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 gliding = false;
-                tracking = LiquidSettings.liquidTabBar() && inTabs(event.getX(), event.getY());
+                tracking = LiquidSettings.liquidTabBar() && tabs.isShown() && pill.isShown()
+                        && inTabs(event.getX(), event.getY());
+                if (!tracking) return false;
                 downX = event.getX();
-                return false; // Apple shows its press and handles taps.
+                forward(MotionEvent.obtain(event)); // Apple shows its press.
+                return true;
 
             case MotionEvent.ACTION_MOVE:
                 if (!tracking) return false;
                 if (!gliding) {
-                    if (Math.abs(event.getX() - downX) <= touchSlop) return false;
+                    if (Math.abs(event.getX() - downX) <= touchSlop) {
+                        forward(MotionEvent.obtain(event));
+                        return true;
+                    }
                     gliding = true;
                     // Apple's press would select the tab the finger started on: cancel it.
                     final MotionEvent cancel = MotionEvent.obtain(event);
                     cancel.setAction(MotionEvent.ACTION_CANCEL);
                     forward(cancel);
-                    tabs.getParent().requestDisallowInterceptTouchEvent(true);
+                    if (drop.getParent() != null) drop.getParent().requestDisallowInterceptTouchEvent(true);
                     if (LiquidSettings.tabHaptics()) tabs.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                     drop.show(clampedX(event.getX()));
                     return true;
@@ -134,9 +147,11 @@ final class TopTabsGlide implements View.OnTouchListener {
                 return true;
 
             case MotionEvent.ACTION_UP:
+                if (!tracking) return false;
                 if (!gliding) {
                     tracking = false;
-                    return false;
+                    forward(MotionEvent.obtain(event)); // A plain tap: Apple's.
+                    return true;
                 }
                 tracking = gliding = false;
                 final float x = clampedX(event.getX());
@@ -147,13 +162,16 @@ final class TopTabsGlide implements View.OnTouchListener {
                 return true;
 
             case MotionEvent.ACTION_CANCEL:
-                final boolean wasGliding = gliding;
+                if (!tracking) return false;
+                if (!gliding) forward(MotionEvent.obtain(event));
                 tracking = gliding = false;
-                if (wasGliding) drop.hide();
-                return wasGliding;
+                drop.hide();
+                return true;
 
             default:
-                return gliding;
+                // Other pointers: Apple's until the glide starts.
+                if (tracking && !gliding) forward(MotionEvent.obtain(event));
+                return tracking;
         }
     }
 
@@ -170,11 +188,9 @@ final class TopTabsGlide implements View.OnTouchListener {
     }
 
     private void forward(MotionEvent event) {
-        forwarding = true;
         try {
             tabs.dispatchTouchEvent(event);
         } finally {
-            forwarding = false;
             event.recycle();
         }
     }
@@ -230,6 +246,7 @@ final class TopTabsGlide implements View.OnTouchListener {
         private final GlassRim rim;
         private ValueAnimator animator;
         private float progress;
+        private boolean showing;
         /** Centre of the drop, in the coordinates of the strip. */
         private float centerX;
         private int effectWidth = -1;
@@ -243,8 +260,23 @@ final class TopTabsGlide implements View.OnTouchListener {
             shadow.setColor(0x1A000000);
             shadow.setMaskFilter(new BlurMaskFilter(12f * density, BlurMaskFilter.Blur.NORMAL));
             setWillNotDraw(false);
-            setVisibility(INVISIBLE);
+            // Visible all the time, to receive the touches on the strip, but draws nothing at rest.
             setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
+
+        @SuppressLint("ClickableViewAccessibility") // Taps go on to Apple's strip and its semantics.
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            // To the coordinates of the strip.
+            final float dx = tabs.getLeft() + tabs.getTranslationX() - getLeft() - getTranslationX();
+            final float dy = tabs.getTop() + tabs.getTranslationY() - getTop() - getTranslationY();
+            final MotionEvent local = MotionEvent.obtain(event);
+            local.offsetLocation(-dx, -dy);
+            try {
+                return TopTabsGlide.this.onTouch(local);
+            } finally {
+                local.recycle();
+            }
         }
 
         /** Width of the drop at rest, close to Apple's selection. */
@@ -258,7 +290,7 @@ final class TopTabsGlide implements View.OnTouchListener {
 
         void show(float x) {
             centerX = x;
-            setVisibility(VISIBLE);
+            showing = true;
             animateTo(1f, null);
             invalidate();
         }
@@ -269,8 +301,9 @@ final class TopTabsGlide implements View.OnTouchListener {
         }
 
         void hide() {
-            if (getVisibility() != VISIBLE) return;
-            animateTo(0f, () -> setVisibility(INVISIBLE));
+            if (!showing) return;
+            showing = false;
+            animateTo(0f, null);
         }
 
         private void animateTo(float target, Runnable end) {
@@ -308,7 +341,8 @@ final class TopTabsGlide implements View.OnTouchListener {
                 drawDrop(canvas);
             } catch (Throwable t) {
                 Log.e(LiquidGlassPatch.TAG, "Tab glide drop failed", t);
-                setVisibility(INVISIBLE);
+                showing = false;
+                progress = 0f;
             }
         }
 
@@ -373,7 +407,7 @@ final class TopTabsGlide implements View.OnTouchListener {
             rim.draw(canvas);
 
             // The strip and its glass change while the finger moves (Apple's press, scrolling).
-            if (getVisibility() == VISIBLE) postInvalidateOnAnimation();
+            if (showing) postInvalidateOnAnimation();
         }
 
         private RenderEffect lens(int width, int height, float corner) {
