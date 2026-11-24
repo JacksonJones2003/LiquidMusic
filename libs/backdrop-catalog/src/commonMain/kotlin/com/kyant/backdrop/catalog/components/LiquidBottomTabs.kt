@@ -19,6 +19,8 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.util.fastCoerceAtLeast
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -100,14 +102,23 @@ fun LiquidBottomTabs(
         contentAlignment = Alignment.CenterStart
     ) {
         val density = LocalDensity.current
-        val tabWidth = with(density) {
-            (constraints.maxWidth.toFloat() - 8f.dp.toPx()) / tabsCount
-        }
+        // LiquidMusic: the width is read through state by the remembered lambdas below, which
+        // otherwise keep the one of the first measure. A first measure at zero width (a view
+        // added to a ConstraintLayout) gave a NaN offset that hid the whole bar for good.
+        val tabWidthState = rememberUpdatedState(
+            with(density) {
+                ((constraints.maxWidth.toFloat() - 8f.dp.toPx()) / tabsCount).fastCoerceAtLeast(0f)
+            }
+        )
+        val tabWidth by tabWidthState
+        val maxWidth by rememberUpdatedState(constraints.maxWidth)
 
         val offsetAnimation = remember { Animatable(0f) }
         val panelOffset by remember(density) {
             derivedStateOf {
-                val fraction = (offsetAnimation.value / constraints.maxWidth).fastCoerceIn(-1f, 1f)
+                val fraction =
+                    if (maxWidth <= 0) 0f
+                    else (offsetAnimation.value / maxWidth).fastCoerceIn(-1f, 1f)
                 with(density) {
                     4f.dp.toPx() * fraction.sign * EaseOut.transform(abs(fraction))
                 }
@@ -141,7 +152,7 @@ fun LiquidBottomTabs(
                 },
                 onDrag = { _, dragAmount ->
                     updateValue(
-                        (targetValue + dragAmount.x / tabWidth * if (isLtr) 1f else -1f)
+                        (targetValue + (if (tabWidth > 0f) dragAmount.x / tabWidth else 0f) * if (isLtr) 1f else -1f)
                             .fastCoerceIn(0f, (tabsCount - 1).toFloat())
                     )
                     animationScope.launch {

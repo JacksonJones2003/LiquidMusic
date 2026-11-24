@@ -57,6 +57,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -122,6 +124,31 @@ internal class LiquidTopBar private constructor(
     private var overlayX by mutableIntStateOf(0)
     private var overlayY by mutableIntStateOf(0)
 
+    // Diagnostics, readable with uiautomator as the overlay's content description (this app's
+    // process writes nothing to logcat on some phones).
+    private var diagMenu = ""
+    private var diagComposed = ""
+    private val diagTabs = sortedMapOf<Int, String>()
+    private var diagArea = ""
+    private val diagPlaced = sortedMapOf<Int, String>()
+
+    private fun updateDiag() {
+        overlay.contentDescription = "LMDIAG " + diagMenu + " | composed " + diagComposed + " | drawn " + diagTabs +
+            " | checked " + checkedId() + " | strip " + strip.width + "x" + strip.height +
+            " | settings hideNew=" + LiquidSettings.hideNewTab() + " hideRadio=" + LiquidSettings.hideRadioTab() +
+            " | font " + labelTypeface + " | area " + diagArea + " | placed " + diagPlaced
+    }
+
+    private fun logComposition(count: Int) {
+        diagComposed = "$count tabs, bar $barX/$barWidth x $barHeight, selected $selectedIndex"
+        updateDiag()
+    }
+
+    private fun logTab(index: Int, title: String) {
+        diagTabs[index] = title
+        updateDiag()
+    }
+
     init {
         overlay.outlineProvider = null
         overlay.setContent { Bar() }
@@ -179,13 +206,21 @@ internal class LiquidTopBar private constructor(
                         onTabSelected = ::onTabSelected,
                         backdrop = appleContent,
                         tabsCount = tabs.size,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .onGloballyPositioned { diagArea = it.size.toString() + "@" + it.positionInRoot(); updateDiag() },
                         glass = glass,
                         barHeight = height,
                         showBar = false,
                     ) {
                         tabs.forEachIndexed { index, tab ->
-                            LiquidBottomTab({ onTabClicked(index) }) {
+                            LiquidBottomTab(
+                                { onTabClicked(index) },
+                                Modifier.onGloballyPositioned {
+                                    diagPlaced[index] = it.size.toString() + "@" + it.positionInRoot() + (if (it.isAttached) "" else "(detached)")
+                                    updateDiag()
+                                }
+                            ) {
                                 SideEffect { logTab(index, tab.title) }
                                 BasicText(
                                     tab.title,
@@ -207,27 +242,6 @@ internal class LiquidTopBar private constructor(
                 }
             }
         }
-    }
-
-    // Diagnostics, readable with uiautomator as the overlay's content description (this app's
-    // process writes nothing to logcat on some phones).
-    private var diagMenu = ""
-    private var diagComposed = ""
-    private val diagTabs = sortedMapOf<Int, String>()
-
-    private fun updateDiag() {
-        overlay.contentDescription = "LMDIAG " + diagMenu + " | composed " + diagComposed + " | drawn " + diagTabs +
-            " | checked " + checkedId() + " | strip " + strip.width + "x" + strip.height
-    }
-
-    private fun logComposition(count: Int) {
-        diagComposed = "$count tabs, bar $barX/$barWidth x $barHeight, selected $selectedIndex"
-        updateDiag()
-    }
-
-    private fun logTab(index: Int, title: String) {
-        diagTabs[index] = title
-        updateDiag()
     }
 
     private fun DrawScope.drawMenuIcon(color: Color) {

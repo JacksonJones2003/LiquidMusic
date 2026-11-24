@@ -15,6 +15,16 @@
     <item name="action_multiply_radio_deprecated" type="id" />
     <item name="action_library_deprecated" type="id" />
     <item name="search_fragment_deprecated" type="id" />
+    <!-- Large screens (layout-w600dp): the floating tab strip at the top and the drawer, whose
+         menu holds the same top-level pages. -->
+    <item name="top_nav_blur" type="id" />
+    <item name="top_nav_tabs" type="id" />
+    <item name="drawer_nav_view" type="id" />
+    <item name="top_level_home_page" type="id" />
+    <item name="top_level_new_page" type="id" />
+    <item name="top_level_radio_page" type="id" />
+    <item name="top_level_library_page" type="id" />
+    <item name="top_level_search_page" type="id" />
     <dimen name="corner_radius_pill">80dp</dimen>
     <dimen name="apple_material_bg_stroke">0.5dp</dimen>
     <color name="apple_material_background">#99262628</color>
