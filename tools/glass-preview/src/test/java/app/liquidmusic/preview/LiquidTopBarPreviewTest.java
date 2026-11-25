@@ -30,6 +30,8 @@ public class LiquidTopBarPreviewTest extends PreviewScene {
     private BlurView stripGlass;
     private FrameLayout strip;
     private StandInNavigationView drawer;
+    private FrameLayout moreBar;
+    private int[] moreTaps;
 
     /**
      * Measures a child at zero width the first time it is laid out, as Apple's ConstraintLayout
@@ -92,6 +94,27 @@ public class LiquidTopBarPreviewTest extends PreviewScene {
         stripParams.topMargin = dp(136);
         root.addView(strip, stripParams);
 
+        // A page's floating bar with its "More Options" button at the top right (a ComposeView in
+        // Apple's app, which handles the button's taps).
+        moreTaps = new int[1];
+        moreBar = new FrameLayout(activity) {
+            @Override
+            public boolean dispatchTouchEvent(android.view.MotionEvent event) {
+                // Only the bar's own taps (down and up at the same time), not a finger going through.
+                if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP
+                        && event.getEventTime() == event.getDownTime()) moreTaps[0]++;
+                return true;
+            }
+        };
+        moreBar.setId(R.id.floating_app_bar_container);
+        FrameLayout moreButton = new FrameLayout(activity);
+        moreButton.setId(R.id.option_button_blur);
+        moreButton.setBackgroundColor(Color.MAGENTA);
+        FrameLayout.LayoutParams moreParams = new FrameLayout.LayoutParams(dp(40), dp(40), Gravity.END | Gravity.TOP);
+        moreParams.setMargins(0, dp(146), dp(16), 0);
+        moreBar.addView(moreButton, moreParams);
+        target.addView(moreBar, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(200)));
+
         drawer = new StandInNavigationView(activity);
         drawer.setId(R.id.drawer_nav_view);
         int[] ids = {R.id.top_level_home_page, R.id.top_level_new_page, R.id.top_level_radio_page,
@@ -146,19 +169,17 @@ public class LiquidTopBarPreviewTest extends PreviewScene {
         assertTrue("search was selected in Apple's drawer, got " + drawer.selections,
                 drawer.selections.contains(R.id.top_level_search_page));
 
-        // The menu button is a tab too: the drop goes onto it, then back to the current page.
-        int[] stripTaps = {0};
-        strip.setOnTouchListener((view, event) -> {
-            // Only the bar's own taps (down and up at the same time), not the finger going through.
-            if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP
-                    && event.getEventTime() == event.getDownTime()) stripTaps[0]++;
-            return true;
-        });
+        // Apple's floating more button is hidden: its bar is clipped just before it.
+        assertTrue("Apple's more button is hidden", moreBar.getClipBounds() != null
+                && moreBar.getClipBounds().right <= moreBar.getWidth() - dp(16) - dp(40));
+
+        // The more button is the first tab: the drop goes onto it, Apple's button is tapped (its
+        // popup opens), then the drop goes back to the current page.
         tap(new float[]{tabsLeft + 0.5f * tabWidth, centerY});
-        render("liquid-top-bar-menu-pressed"); // 400 ms later: the drop rests on the menu button.
-        assertTrue("the menu tab of the bar opened the drawer through Apple's strip, taps: " + stripTaps[0], stripTaps[0] == 1);
+        render("liquid-top-bar-more-pressed");
+        assertTrue("the more tab tapped Apple's more button, taps: " + moreTaps[0], moreTaps[0] == 1);
         advance(900);
         render(null); // A frame, which sends the drop back (the preview only draws on demand).
-        render("liquid-top-bar-menu-back");
+        render("liquid-top-bar-more-back");
     }
 }

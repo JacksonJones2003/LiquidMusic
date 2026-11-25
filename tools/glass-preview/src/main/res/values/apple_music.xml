@@ -25,6 +25,9 @@
     <item name="top_level_radio_page" type="id" />
     <item name="top_level_library_page" type="id" />
     <item name="top_level_search_page" type="id" />
+    <!-- A page's floating bar, with its "More Options" button. -->
+    <item name="floating_app_bar_container" type="id" />
+    <item name="option_button_blur" type="id" />
     <dimen name="corner_radius_pill">80dp</dimen>
     <dimen name="apple_material_bg_stroke">0.5dp</dimen>
     <color name="apple_material_background">#99262628</color>

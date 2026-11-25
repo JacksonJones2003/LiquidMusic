@@ -81,14 +81,16 @@ import kotlin.math.roundToInt
  * drop of glass that lifts when pressed, can be dragged from tab to tab, and settles on the tab.
  *
  * Apple's strip stays where it is, laid out but no longer drawn (empty clip bounds). The glass of
- * the strip is still Apple's BlurView, drawn by [GlassRenderer]; this bar only draws the tabs, the
- * drop, the menu button and the search button, in a ComposeView next to the strip that follows it
- * on every frame.
+ * the strip is still Apple's BlurView, drawn by [GlassRenderer]; this bar only draws the tabs and
+ * the drop, in a ComposeView next to the strip that follows it on every frame.
  *
  * On these screens Apple also keeps its tabs in the menu of the navigation drawer
  * (drawer_nav_view, top_level_*_page), and checks the current one there. The bar reads the tabs
  * and the selection from that menu and selects tabs through it, which is what Apple's drawer does.
- * The menu and search buttons tap Apple's strip at their places.
+ *
+ * The first tab is the page's "More Options" button (⋮), moved into the bar: it taps Apple's own
+ * button, hidden at the top right of the page, so Apple's popup opens. The strip's menu button
+ * (the drawer) is not part of the bar.
  */
 @RequiresApi(Build.VERSION_CODES.S)
 internal class LiquidTopBar private constructor(
@@ -98,10 +100,10 @@ internal class LiquidTopBar private constructor(
 ) : ViewTreeObserver.OnPreDrawListener, View.OnAttachStateChangeListener {
 
     /**
-     * A tab: a title, an icon (search), or the menu button, which is a tab of the bar so the drop
-     * can reach it too, but opens Apple's drawer instead of a page.
+     * A tab: a title, an icon (search), or the more button (⋮), which is a tab of the bar so the
+     * drop can reach it too, but opens Apple's "More Options" popup instead of a page.
      */
-    private class Tab(val id: Int, val title: String, val icon: Drawable? = null, val menu: Boolean = false)
+    private class Tab(val id: Int, val title: String, val icon: Drawable? = null, val more: Boolean = false)
 
     private val parent = strip.parent as ViewGroup
     private val overlay: ComposeView = ComposeHost.createView(strip.context)
@@ -118,8 +120,13 @@ internal class LiquidTopBar private constructor(
     // State read by the composition.
     private var tabs by mutableStateOf(emptyList<Tab>())
     private var selectedIndex by mutableIntStateOf(0)
-    /** Until when the drop stays on the menu button after it opened the drawer. */
-    private var menuReturnAt = 0L
+    /** Until when the drop stays on the more button after it opened Apple's popup. */
+    private var moreButton = java.lang.ref.WeakReference<View>(null)
+    private var nextMoreSearch = 0L
+    /** Whether the page on screen has a more button (the tab is dimmed otherwise). */
+    private var moreAvailable by mutableStateOf(false)
+    private val clippedContainers = WeakHashMap<View, Boolean>()
+    private var moreReturnAt = 0L
     private var barX by mutableIntStateOf(0)
     private var barWidth by mutableIntStateOf(0)
     private var barHeight by mutableIntStateOf(0)
@@ -183,8 +190,8 @@ internal class LiquidTopBar private constructor(
                         tabs.forEachIndexed { index, tab ->
                             LiquidBottomTab({ onTabClicked(index) }) {
                                 val icon = tab.icon
-                                if (tab.menu) {
-                                    Box(Modifier.size(24f.dp).drawBehind { drawMenuIcon(contentColor) })
+                                if (tab.more) {
+                                    Box(Modifier.size(24f.dp).drawBehind { drawMoreIcon(contentColor) })
                                 } else if (icon != null) {
                                     // Search: Apple's magnifying glass, as a tab the drop can reach.
                                     Box(Modifier.size(24f.dp).drawBehind { drawIcon(icon, contentColor) })
@@ -205,16 +212,12 @@ internal class LiquidTopBar private constructor(
         }
     }
 
-    private fun DrawScope.drawMenuIcon(color: Color) {
-        val lineWidth = 20f * density
-        val stroke = 2.4f * density
-        val gap = 6.5f * density
-        val left = (size.width - lineWidth) / 2f
-        val centerY = size.height / 2f
-        for (i in -1..1) {
-            val y = centerY + i * gap
-            drawLine(color, Offset(left, y), Offset(left + lineWidth, y), stroke, StrokeCap.Round)
-        }
+    private fun DrawScope.drawMoreIcon(color: Color) {
+        val radius = 2.6f * density
+        val gap = 7f * density
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val dots = if (moreAvailable) color else color.copy(alpha = color.alpha * 0.35f)
+        for (i in -1..1) drawCircle(dots, radius, Offset(center.x, center.y + i * gap))
     }
 
     private fun DrawScope.drawIcon(icon: Drawable, color: Color) {
@@ -254,13 +257,13 @@ internal class LiquidTopBar private constructor(
 
     private fun onTabClicked(index: Int) {
         val tab = tabs.getOrNull(index) ?: return
-        if (tab.menu) {
-            // The drop moves onto the menu button, then onTabSelected opens the drawer. Until
+        if (tab.more) {
+            // The drop moves onto the more button, then onTabSelected opens Apple's popup. Until
             // then, the frame sync must not send it back to the current page.
             if (index == selectedIndex) {
-                openMenu(index)
+                openMore(index)
             } else {
-                menuReturnAt = SystemClock.uptimeMillis() + MENU_SLIDE_TIMEOUT_MS
+                moreReturnAt = SystemClock.uptimeMillis() + MORE_SLIDE_TIMEOUT_MS
                 selectedIndex = index
             }
             return
@@ -277,8 +280,8 @@ internal class LiquidTopBar private constructor(
     private fun onTabSelected(index: Int) {
         val tab = tabs.getOrNull(index) ?: return
         selectedIndex = index
-        if (tab.menu) {
-            openMenu(index)
+        if (tab.more) {
+            openMore(index)
             return
         }
         if (checkedId() != tab.id) {
@@ -299,7 +302,7 @@ internal class LiquidTopBar private constructor(
                     tapStrip(height = pill.height, start = false)
                 } else {
                     // Apple's text tabs share the strip between its two round buttons.
-                    val textTabs = tabs.filter { it.icon == null && !it.menu }
+                    val textTabs = tabs.filter { it.icon == null && !it.more }
                     val position = textTabs.indexOf(tab)
                     val tabWidth = (pill.width - 2f * pill.height) / textTabs.size.coerceAtLeast(1)
                     tapStripAt(pill.height + tabWidth * (position + 0.5f))
@@ -309,21 +312,101 @@ internal class LiquidTopBar private constructor(
     }
 
     /**
-     * Opens Apple's drawer with its menu button. The drop stays on the button a moment, then
-     * goes back to the current page.
+     * Opens Apple's "More Options" popup with its own button, hidden at the top of the page. The
+     * drop stays on the tab a moment, then goes back to the current page.
      */
-    private fun openMenu(index: Int) {
+    private fun openMore(index: Int) {
         selectedIndex = index
-        menuReturnAt = SystemClock.uptimeMillis() + MENU_RETURN_DELAY_MS
+        moreReturnAt = SystemClock.uptimeMillis() + MORE_RETURN_DELAY_MS
         if (LiquidSettings.tabHaptics()) overlay.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-        tapStrip(height = pill.height, start = true)
+        tapMore()
         overlay.postDelayed({
-            if (SystemClock.uptimeMillis() < menuReturnAt || tabs.getOrNull(selectedIndex)?.menu != true) return@postDelayed
+            if (SystemClock.uptimeMillis() < moreReturnAt || tabs.getOrNull(selectedIndex)?.more != true) return@postDelayed
             val checked = checkedId()
-            val current = if (checked == View.NO_ID) -1 else tabs.indexOfFirst { !it.menu && it.id == checked }
+            val current = if (checked == View.NO_ID) -1 else tabs.indexOfFirst { !it.more && it.id == checked }
             if (current >= 0) selectedIndex = current
-        }, MENU_RETURN_DELAY_MS)
+        }, MORE_RETURN_DELAY_MS)
     }
+
+    // region Apple's more button
+
+    /**
+     * Apple's "More Options" button (⋮) floats at the top right of each page: the glass
+     * option_button_blur, in an AndroidView of the page's floating_app_bar_container ComposeView,
+     * which draws the dots and handles the tap. Finds the one of the page on screen.
+     */
+    private fun findMoreButton(): View? {
+        moreButton.get()?.let { if (it.isAttachedToWindow && it.isShown && it.width > 0) return it }
+        val now = SystemClock.uptimeMillis()
+        if (now < nextMoreSearch) return null
+        nextMoreSearch = now + MORE_SEARCH_INTERVAL_MS
+        val id = LiquidGlassPatch.idOf(pill, "option_button_blur")
+        if (id == 0) return null
+        val found = findShown(strip.rootView, id)
+        moreButton = java.lang.ref.WeakReference(found)
+        return found
+    }
+
+    private fun findShown(view: View, id: Int): View? {
+        if (view.visibility != View.VISIBLE) return null
+        if (view.id == id && view.width > 0 && view.isShown) return view
+        if (view is ViewGroup) {
+            for (i in view.childCount - 1 downTo 0) findShown(view.getChildAt(i), id)?.let { return it }
+        }
+        return null
+    }
+
+    /** The page's floating bar that holds the button, which receives its taps. */
+    private fun moreContainer(button: View): View? {
+        val id = LiquidGlassPatch.idOf(pill, "floating_app_bar_container")
+        var parent = button.parent
+        while (parent is View) {
+            if (parent.id == id) return parent
+            parent = parent.parent
+        }
+        return null
+    }
+
+    /**
+     * Hides Apple's floating more button, which is now a tab of the bar: clips the page's
+     * floating bar just before it, so the buttons on its left (back, share) stay.
+     */
+    private fun hideMoreButton(button: View?) {
+        val container = button?.let(::moreContainer) ?: return
+        button.getLocationInWindow(location)
+        val buttonLeft = location[0]
+        container.getLocationInWindow(location)
+        val clip = Rect(0, 0, (buttonLeft - location[0]).coerceAtLeast(0), container.height)
+        if (container.clipBounds != clip) container.clipBounds = clip
+        clippedContainers[container] = true
+    }
+
+    private fun showMoreButtons() {
+        for (container in clippedContainers.keys.toList()) container.clipBounds = null
+        clippedContainers.clear()
+    }
+
+    /** A tap on Apple's more button, which opens its popup where the button is. */
+    private fun tapMore() {
+        val button = findMoreButton() ?: return
+        val container = moreContainer(button) ?: return
+        button.getLocationInWindow(location)
+        val x = location[0] + button.width / 2f
+        val y = location[1] + button.height / 2f
+        container.getLocationInWindow(location)
+        val time = SystemClock.uptimeMillis()
+        for (action in intArrayOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+            val event = MotionEvent.obtain(time, time, action, x - location[0], y - location[1], 0)
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            try {
+                container.dispatchTouchEvent(event)
+            } finally {
+                event.recycle()
+            }
+        }
+    }
+
+    // endregion
 
     /** Taps one of the round buttons at the ends of Apple's strip. */
     private fun tapStrip(height: Int, start: Boolean) {
@@ -353,7 +436,7 @@ internal class LiquidTopBar private constructor(
         val resources = drawer.resources
         val all = (0 until menu.size()).map(menu::getItem).filter { it.isVisible }
         val names = all.associateWith { runCatching { resources.getResourceEntryName(it.itemId) }.getOrDefault("") }
-        tabs = listOf(Tab(View.NO_ID, "", menu = true)) + all.filter { item ->
+        tabs = listOf(Tab(View.NO_ID, "", more = true)) + all.filter { item ->
             val name = names[item]!!
             name.startsWith("top_level_") && !isHidden(name)
         }.map { item ->
@@ -398,7 +481,14 @@ internal class LiquidTopBar private constructor(
         // draws nothing while the bar has tabs to show.
         val replace = tabs.isNotEmpty()
         if (replace && strip.clipBounds?.isEmpty != true) strip.clipBounds = EMPTY
-        if (!replace && strip.clipBounds != null) strip.clipBounds = null
+        if (!replace && strip.clipBounds != null) {
+            strip.clipBounds = null
+            showMoreButtons()
+        }
+
+        val more = if (replace) findMoreButton() else null
+        if (moreAvailable != (more != null)) moreAvailable = more != null
+        hideMoreButton(more)
 
         val shown = replace && strip.isShown && pill.isShown
         val visibility = if (shown) View.VISIBLE else View.INVISIBLE
@@ -426,9 +516,9 @@ internal class LiquidTopBar private constructor(
         overlayY = location[1]
 
         val checked = checkedId()
-        val index = if (checked == View.NO_ID) -1 else tabs.indexOfFirst { !it.menu && it.id == checked }
-        // Back to the current page once the drop has shown the menu button pressed.
-        if (index >= 0 && index != selectedIndex && SystemClock.uptimeMillis() >= menuReturnAt) selectedIndex = index
+        val index = if (checked == View.NO_ID) -1 else tabs.indexOfFirst { !it.more && it.id == checked }
+        // Back to the current page once the drop has shown the more button pressed.
+        if (index >= 0 && index != selectedIndex && SystemClock.uptimeMillis() >= moreReturnAt) selectedIndex = index
     }
 
     /** Gives the strip back to Apple (the setting was turned off). */
@@ -437,6 +527,7 @@ internal class LiquidTopBar private constructor(
         strip.removeOnAttachStateChangeListener(this)
         parent.removeView(overlay)
         strip.clipBounds = null
+        showMoreButtons()
         BARS.remove(strip)
     }
 
@@ -452,9 +543,11 @@ internal class LiquidTopBar private constructor(
 
     companion object {
         private val EMPTY = Rect()
-        private const val MENU_RETURN_DELAY_MS = 600L
-        /** Longest the drop may take to reach the menu button before the sync takes over again. */
-        private const val MENU_SLIDE_TIMEOUT_MS = 1500L
+        private const val MORE_RETURN_DELAY_MS = 600L
+        /** How often to look for the more button of the page on screen when there is none. */
+        private const val MORE_SEARCH_INTERVAL_MS = 300L
+        /** Longest the drop may take to reach the more button before the sync takes over again. */
+        private const val MORE_SLIDE_TIMEOUT_MS = 1500L
         private val BARS = WeakHashMap<View, LiquidTopBar?>()
         private val FAILED = WeakHashMap<View, Boolean>()
         private val METHODS = HashMap<String, java.lang.reflect.Method>()
