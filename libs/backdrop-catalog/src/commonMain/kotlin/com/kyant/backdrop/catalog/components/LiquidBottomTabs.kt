@@ -27,6 +27,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -213,6 +214,9 @@ fun LiquidBottomTabs(
                         onDrawSurface = { drawRect(containerColor) }
                     )
                 )
+                // LiquidMusic: without its own glass the bar has no capsule clip, and the press
+                // highlight (a rectangle) lit up the corners outside the glass under it.
+                .then(if (showBar) Modifier else Modifier.clip(Capsule()))
                 .then(interactiveHighlight.modifier)
                 .height(barHeight)
                 .fillMaxWidth()
